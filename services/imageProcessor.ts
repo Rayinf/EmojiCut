@@ -71,17 +71,20 @@ const mergeRects = (rects: Rect[], distanceThreshold: number): Rect[] => {
 };
 
 /**
- * Extracts a specific region from an image/canvas, removes background, and returns a segment.
+ * Extracts a specific region from an image/canvas, removes background, and adds a white stroke.
  */
 export const extractStickerFromRect = (
   source: HTMLImageElement | HTMLCanvasElement,
   rect: Rect,
   defaultName: string = 'sticker'
 ): StickerSegment | null => {
-    const padding = 5;
+    const padding = 2;
+    const strokeWidth = 6; // Width of the white border
+
     const width = source.width;
     const height = source.height;
 
+    // 1. Calculate dimensions for the raw cutout
     const finalX = Math.max(0, rect.minX - padding);
     const finalY = Math.max(0, rect.minY - padding);
     const finalW = Math.min(width - finalX, (rect.maxX - rect.minX) + padding * 2);
@@ -89,6 +92,7 @@ export const extractStickerFromRect = (
 
     if (finalW <= 0 || finalH <= 0) return null;
 
+    // 2. Create the raw cutout with background removed
     const segCanvas = document.createElement('canvas');
     segCanvas.width = finalW;
     segCanvas.height = finalH;
@@ -105,18 +109,58 @@ export const extractStickerFromRect = (
     const segPixels = segImageData.data;
     for (let i = 0; i < segPixels.length; i += 4) {
       if (isBackground(segPixels[i], segPixels[i+1], segPixels[i+2], segPixels[i+3])) {
-        segPixels[i+3] = 0; 
+        segPixels[i+3] = 0; // Make transparent
       }
     }
     segCtx.putImageData(segImageData, 0, 0);
 
+    // 3. Create a silhouette for the stroke
+    const silhouetteCanvas = document.createElement('canvas');
+    silhouetteCanvas.width = finalW;
+    silhouetteCanvas.height = finalH;
+    const sCtx = silhouetteCanvas.getContext('2d');
+    if (!sCtx) return null;
+
+    sCtx.drawImage(segCanvas, 0, 0);
+    sCtx.globalCompositeOperation = 'source-in';
+    sCtx.fillStyle = '#FFFFFF';
+    sCtx.fillRect(0, 0, finalW, finalH);
+
+    // 4. Create Final Canvas with extra space for the stroke
+    const finalCanvas = document.createElement('canvas');
+    finalCanvas.width = finalW + (strokeWidth * 2);
+    finalCanvas.height = finalH + (strokeWidth * 2);
+    const fCtx = finalCanvas.getContext('2d');
+    if (!fCtx) return null;
+
+    // Enable smoothing for better stroke edges
+    fCtx.imageSmoothingEnabled = true;
+    fCtx.imageSmoothingQuality = 'high';
+
+    // Draw the silhouette multiple times in a circle to create the stroke
+    const steps = 24; 
+    for (let i = 0; i < steps; i++) {
+        const angle = (i / steps) * 2 * Math.PI;
+        const ox = strokeWidth + Math.cos(angle) * strokeWidth;
+        const oy = strokeWidth + Math.sin(angle) * strokeWidth;
+        fCtx.drawImage(silhouetteCanvas, ox, oy);
+    }
+    
+    // Fill the center of the stroke to ensure no gaps between stroke and image
+    // (This also helps fill in small internal holes that were removed by background keying)
+    fCtx.drawImage(silhouetteCanvas, strokeWidth, strokeWidth);
+
+    // 5. Draw the original colored image on top
+    fCtx.globalCompositeOperation = 'source-over';
+    fCtx.drawImage(segCanvas, strokeWidth, strokeWidth);
+
     return {
       id: crypto.randomUUID(),
-      dataUrl: segCanvas.toDataURL('image/png'),
+      dataUrl: finalCanvas.toDataURL('image/png'),
       originalX: finalX,
       originalY: finalY,
-      width: finalW,
-      height: finalH,
+      width: finalCanvas.width,
+      height: finalCanvas.height,
       name: defaultName,
       isNaming: false
     };
