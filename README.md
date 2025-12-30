@@ -38,7 +38,7 @@ cd EmojiCut
 npm install
 
 # 配置 API Key
-# 在 .env.local 文件中设置 API_KEY=你的Gemini_API_Key
+# 在 .env.local 文件中设置 GEMINI_API_KEY=你的Gemini_API_Key
 
 # 启动开发服务器
 npm run dev
