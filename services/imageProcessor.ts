@@ -85,10 +85,11 @@ export const extractStickerFromRect = (
   const height = source.height;
 
   // 1. Calculate dimensions for the raw cutout
-  const finalX = Math.max(0, rect.minX - padding);
-  const finalY = Math.max(0, rect.minY - padding);
-  const finalW = Math.min(width - finalX, (rect.maxX - rect.minX) + padding * 2);
-  const finalH = Math.min(height - finalY, (rect.maxY - rect.minY) + padding * 2);
+  // CRITICAL: Round all coordinates to integers to prevent pixel indexing errors
+  const finalX = Math.max(0, Math.floor(rect.minX - padding));
+  const finalY = Math.max(0, Math.floor(rect.minY - padding));
+  const finalW = Math.floor(Math.min(width - finalX, (rect.maxX - rect.minX) + padding * 2));
+  const finalH = Math.floor(Math.min(height - finalY, (rect.maxY - rect.minY) + padding * 2));
 
   if (finalW <= 0 || finalH <= 0) return null;
 
@@ -112,31 +113,52 @@ export const extractStickerFromRect = (
   const isExterior = new Uint8Array(finalW * finalH);
   const stack: [number, number][] = [];
 
-  // Push all edge pixels into the stack if they are background
+  // Push all edge pixels into the stack - start flood-fill from all edges
   for (let x = 0; x < finalW; x++) {
-    stack.push([x, 0], [x, finalH - 1]);
+    // Top edge
+    const topIdx = x * 4;
+    if (isBackground(segPixels[topIdx], segPixels[topIdx + 1], segPixels[topIdx + 2], segPixels[topIdx + 3])) {
+      stack.push([x, 0]);
+    }
+    // Bottom edge
+    const bottomIdx = ((finalH - 1) * finalW + x) * 4;
+    if (isBackground(segPixels[bottomIdx], segPixels[bottomIdx + 1], segPixels[bottomIdx + 2], segPixels[bottomIdx + 3])) {
+      stack.push([x, finalH - 1]);
+    }
   }
   for (let y = 1; y < finalH - 1; y++) {
-    stack.push([0, y], [finalW - 1, y]);
-  }
-
-  while (stack.length > 0) {
-    const [cx, cy] = stack.pop()!;
-    const idx = (cy * finalW + cx) * 4;
-    const visitIdx = cy * finalW + cx;
-
-    if (!isExterior[visitIdx] && isBackground(segPixels[idx], segPixels[idx + 1], segPixels[idx + 2], segPixels[idx + 3])) {
-      isExterior[visitIdx] = 1;
-
-      // Check 4-neighbors
-      if (cx > 0) stack.push([cx - 1, cy]);
-      if (cx < finalW - 1) stack.push([cx + 1, cy]);
-      if (cy > 0) stack.push([cx, cy - 1]);
-      if (cy < finalH - 1) stack.push([cx, cy + 1]);
+    // Left edge
+    const leftIdx = (y * finalW) * 4;
+    if (isBackground(segPixels[leftIdx], segPixels[leftIdx + 1], segPixels[leftIdx + 2], segPixels[leftIdx + 3])) {
+      stack.push([0, y]);
+    }
+    // Right edge
+    const rightIdx = (y * finalW + finalW - 1) * 4;
+    if (isBackground(segPixels[rightIdx], segPixels[rightIdx + 1], segPixels[rightIdx + 2], segPixels[rightIdx + 3])) {
+      stack.push([finalW - 1, y]);
     }
   }
 
-  // Now clear only pixels that are both exterior AND background
+  // Flood-fill from edge background pixels
+  while (stack.length > 0) {
+    const [cx, cy] = stack.pop()!;
+    const visitIdx = cy * finalW + cx;
+
+    if (isExterior[visitIdx]) continue;
+
+    const idx = (cy * finalW + cx) * 4;
+    if (!isBackground(segPixels[idx], segPixels[idx + 1], segPixels[idx + 2], segPixels[idx + 3])) continue;
+
+    isExterior[visitIdx] = 1;
+
+    // Check 4-neighbors
+    if (cx > 0) stack.push([cx - 1, cy]);
+    if (cx < finalW - 1) stack.push([cx + 1, cy]);
+    if (cy > 0) stack.push([cx, cy - 1]);
+    if (cy < finalH - 1) stack.push([cx, cy + 1]);
+  }
+
+  // Now clear only pixels that are exterior background
   for (let i = 0; i < finalW * finalH; i++) {
     if (isExterior[i]) {
       segPixels[i * 4 + 3] = 0;
