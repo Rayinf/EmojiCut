@@ -21,6 +21,10 @@ const CutePrinter2D: React.FC<CutePrinterProps> = ({ status, progress, message, 
     const [isGenerating, setIsGenerating] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [showInstructions, setShowInstructions] = useState(false);
+    const [isDragging, setIsDragging] = useState(false);
+    const [showKeySaved, setShowKeySaved] = useState(false);
+    const [activeMode, setActiveMode] = useState<'generate' | 'direct'>('generate');
+    const [showKeyError, setShowKeyError] = useState(false);
 
     const copyToClipboard = (text: string) => {
         if (navigator.clipboard) {
@@ -49,19 +53,26 @@ const CutePrinter2D: React.FC<CutePrinterProps> = ({ status, progress, message, 
 
     const handlePanelClick = () => {
         if (status === 'idle' || status === 'complete') {
-            charInputRef.current?.click();
+            if (activeMode === 'generate') {
+                charInputRef.current?.click();
+            } else {
+                sheetInputRef.current?.click();
+            }
         }
+    };
+
+    const processImageFile = (file: File) => {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            setReferenceImage(event.target?.result as string);
+            setError(null);
+        };
+        reader.readAsDataURL(file);
     };
 
     const handleCharFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files[0]) {
-            const file = e.target.files[0];
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                setReferenceImage(event.target?.result as string);
-                setError(null);
-            };
-            reader.readAsDataURL(file);
+            processImageFile(e.target.files[0]);
         }
     };
 
@@ -70,6 +81,54 @@ const CutePrinter2D: React.FC<CutePrinterProps> = ({ status, progress, message, 
             onDirectUpload(e.target.files[0]);
         }
     };
+
+    // --- Drag & Drop Handlers ---
+    const onDragOver = (e: React.DragEvent) => {
+        e.preventDefault();
+        setIsDragging(true);
+    };
+
+    const onDragLeave = () => {
+        setIsDragging(false);
+    };
+
+    const onDrop = (e: React.DragEvent) => {
+        e.preventDefault();
+        setIsDragging(false);
+        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+            const file = e.dataTransfer.files[0];
+            if (activeMode === 'generate') {
+                processImageFile(file);
+            } else {
+                onDirectUpload(file);
+            }
+        }
+    };
+
+    // --- Paste Event Support ---
+    useEffect(() => {
+        const handlePaste = (e: ClipboardEvent) => {
+            const items = e.clipboardData?.items;
+            if (items) {
+                for (let i = 0; i < items.length; i++) {
+                    if (items[i].type.indexOf('image') !== -1) {
+                        const file = items[i].getAsFile();
+                        if (file) {
+                            if (activeMode === 'generate') {
+                                processImageFile(file);
+                            } else {
+                                onDirectUpload(file);
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+        };
+
+        window.addEventListener('paste', handlePaste);
+        return () => window.removeEventListener('paste', handlePaste);
+    }, []);
 
     const handleGenerate = async () => {
         if (!referenceImage) return;
@@ -101,7 +160,18 @@ const CutePrinter2D: React.FC<CutePrinterProps> = ({ status, progress, message, 
     const currentStatus = isGenerating ? 'generating' : status;
 
     return (
-        <div className={`cute-machine cute-machine-expanded ${currentStatus === 'generating' || currentStatus === 'processing' ? 'processing' : ''}`}>
+        <div
+            className={`cute-machine cute-machine-expanded ${currentStatus === 'generating' || currentStatus === 'processing' ? 'processing' : ''} ${isDragging ? 'dragging' : ''}`}
+            onDragOver={onDragOver}
+            onDragLeave={onDragLeave}
+            onDrop={onDrop}
+        >
+            {isDragging && (
+                <div className="drag-overlay">
+                    <CloudUpload size={48} className="animate-bounce" />
+                    <span>放开以投喂图片 ✨</span>
+                </div>
+            )}
 
             {/* Decorative Floating Icons */}
             <div className="deco deco-star" style={{ top: -20, left: -20 }}><Star fill="currentColor" /></div>
@@ -116,12 +186,19 @@ const CutePrinter2D: React.FC<CutePrinterProps> = ({ status, progress, message, 
             </div>
 
             {/* Screen Area - Upload or Preview */}
-            <div className="machine-screen machine-screen-tall" onClick={!referenceImage ? handlePanelClick : undefined}>
+            <div className={`machine-screen machine-screen-tall ${activeMode === 'direct' ? 'mode-direct' : ''}`} onClick={!referenceImage ? handlePanelClick : undefined}>
                 {!referenceImage ? (
-                    <>
-                        <CloudUpload size={36} className="text-pink-400 mb-2 opacity-60" />
-                        <div className="screen-text">上传角色图片<br /><span style={{ fontSize: '0.8rem', opacity: 0.7 }}>Gemini设计表情包</span></div>
-                    </>
+                    activeMode === 'generate' ? (
+                        <>
+                            <CloudUpload size={36} className="text-pink-400 mb-2 opacity-60" />
+                            <div className="screen-text">上传角色图片<br /><span style={{ fontSize: '0.8rem', opacity: 0.7 }}>Gemini设计表情包</span></div>
+                        </>
+                    ) : (
+                        <>
+                            <Scissors size={36} className="text-blue-400 mb-2 opacity-60" />
+                            <div className="screen-text text-blue-500">上传表情大图<br /><span style={{ fontSize: '0.8rem', opacity: 0.7 }}>直接切割 (任意规格)</span></div>
+                        </>
+                    )
                 ) : (
                     <div className="relative w-full h-full">
                         <img src={referenceImage} alt="Reference" className="w-full h-full object-contain rounded-2xl" />
@@ -174,34 +251,48 @@ const CutePrinter2D: React.FC<CutePrinterProps> = ({ status, progress, message, 
 
             {/* Physical Controls */}
             <div className="flex items-center justify-center gap-6 w-full px-4 mt-6 pb-4">
-                {/* Power / Status Indicator */}
-                <div className="flex flex-col items-center gap-2">
-                    <div className={`w-12 h-12 rounded-full flex items-center justify-center border-b-4 transition-all shadow-sm active:translate-y-0.5 ${isGenerating ? 'bg-green-100 border-green-200 text-green-500' : 'bg-pink-50 border-pink-100 text-pink-300'}`}>
-                        <Heart size={22} fill={isGenerating ? "currentColor" : "none"} />
+                {/* Power / Status Indicator / AI Mode Toggle */}
+                <div
+                    className="flex flex-col items-center gap-2 cursor-pointer group"
+                    onClick={() => {
+                        if (!apiKey.trim()) {
+                            setError('请先设置 API Key 以使用 AI 设计功能');
+                            setShowInstructions(true);
+                            setShowKeyError(true);
+                            setTimeout(() => setShowKeyError(false), 2000);
+                            return;
+                        }
+                        setActiveMode('generate');
+                    }}
+                >
+                    <div className={`w-12 h-12 rounded-full flex items-center justify-center border-b-4 transition-all shadow-sm active:translate-y-0.5 ${activeMode === 'generate' ? 'bg-pink-100 border-pink-300 text-pink-500' : 'bg-pink-50 border-pink-100 text-pink-200 group-hover:text-pink-300'}`}>
+                        <Heart size={22} fill={activeMode === 'generate' ? "currentColor" : "none"} />
                     </div>
-                    <div className={`w-2 h-2 rounded-full ${isGenerating ? 'bg-green-400 animate-pulse' : 'bg-pink-300'}`}></div>
+                    <div className={`w-2 h-2 rounded-full ${activeMode === 'generate' ? (isGenerating ? 'bg-green-400 animate-pulse' : 'bg-pink-400') : 'bg-pink-100'}`}></div>
+                    <div className={`text-[10px] font-bold tracking-tighter uppercase ${activeMode === 'generate' ? 'text-pink-400' : 'text-pink-200'}`}>AI DESIGN</div>
                 </div>
 
                 {/* Generate Button - Main AI Action */}
                 <button
                     className="printer-action-btn flex items-center justify-center gap-2 px-6 h-12 rounded-full bg-pink-400 text-white font-bold border-b-4 border-pink-600 hover:bg-pink-500 transition-all active:translate-y-1 active:border-b-0 disabled:opacity-50 disabled:translate-y-0 disabled:border-b-4"
                     onClick={handleGenerate}
-                    disabled={!referenceImage || isGenerating}
+                    disabled={!referenceImage || isGenerating || activeMode !== 'generate' || !apiKey.trim()}
                 >
                     {isGenerating ? <Loader2 size={18} className="animate-spin" /> : <Wand2 size={18} />}
                     <span>{isGenerating ? '设计中' : '生成贴纸'}</span>
                 </button>
 
-                {/* Cutter Button - Direct Upload */}
+                {/* Cutter Button - Direct Mode Toggle */}
                 <div
                     className="flex flex-col items-center gap-2 group cursor-pointer"
-                    onClick={() => sheetInputRef.current?.click()}
-                    title="直接上传表情包大图进行切割"
+                    onClick={() => setActiveMode('direct')}
+                    title="切换到直接切图模式"
                 >
-                    <div className="w-12 h-12 rounded-full bg-blue-50 border-b-4 border-blue-100 flex items-center justify-center text-blue-300 group-hover:text-blue-500 group-hover:bg-blue-100 active:border-b-0 active:translate-y-1 transition-all shadow-sm">
+                    <div className={`w-12 h-12 rounded-full flex items-center justify-center border-b-4 transition-all shadow-sm active:translate-y-0.5 ${activeMode === 'direct' ? 'bg-blue-100 border-blue-300 text-blue-500' : 'bg-blue-50 border-blue-100 text-blue-200 group-hover:text-blue-300'}`}>
                         <Scissors size={22} />
                     </div>
-                    <div className="text-[10px] font-bold text-blue-300 tracking-tighter group-hover:text-blue-500 uppercase">DIRECT</div>
+                    <div className={`w-2 h-2 rounded-full ${activeMode === 'direct' ? 'bg-blue-400' : 'bg-blue-100'}`}></div>
+                    <div className={`text-[10px] font-bold tracking-tighter uppercase ${activeMode === 'direct' ? 'text-blue-400' : 'text-blue-200'}`}>DIRECT CUT</div>
                 </div>
             </div>
 
@@ -237,20 +328,42 @@ const CutePrinter2D: React.FC<CutePrinterProps> = ({ status, progress, message, 
                             <div className="section-content">
                                 访问 <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="contact-link">Google AI Studio</a> 获取你的个人 Gemini API KEY，填写在下方即可开启 AI 创作功能。
                             </div>
-                            <input
-                                type="password"
-                                className="api-key-input"
-                                placeholder="在此粘贴你的 Gemini API Key..."
-                                value={apiKey}
-                                onChange={(e) => onApiKeyChange(e.target.value)}
-                            />
+                            <div className="relative">
+                                <input
+                                    type="password"
+                                    className={`api-key-input ${showKeyError ? 'error' : ''}`}
+                                    placeholder="在此粘贴你的 Gemini API Key..."
+                                    value={apiKey}
+                                    onChange={(e) => {
+                                        onApiKeyChange(e.target.value);
+                                        if (e.target.value.trim()) {
+                                            setShowKeyError(false);
+                                            setError(null);
+                                        }
+                                        setShowKeySaved(true);
+                                        setTimeout(() => setShowKeySaved(false), 2000);
+                                    }}
+                                />
+                                {showKeySaved && (
+                                    <div className="absolute right-3 top-[60%] -translate-y-1/2 bg-green-500 text-white text-[10px] px-2 py-0.5 rounded-full shadow-sm animate-pulse z-10 pointer-events-none">
+                                        保存成功 ✨
+                                    </div>
+                                )}
+                            </div>
                         </div>
 
                         <div className="instruction-section">
                             <div className="section-title">✨ 双重处理模式</div>
                             <div className="section-content">
                                 • <b>AI 创作</b>：点击屏幕上传单张角色图，Gemini 将为你自动生成并命名全套 16 张表情包。<br />
-                                • <b>直接切图</b>：点击蓝色 <b>DIRECT</b> 按钮上传已有的 16 宫格大图，系统将直接进行切图，无需消耗额度。
+                                • <b>直接切图</b>：点击蓝色 <b>DIRECT</b> 按钮切换模式并上传整张大图，系统将自动识别并切出所有独立贴纸（支持任意排版）。
+                            </div>
+                        </div>
+
+                        <div className="instruction-section">
+                            <div className="section-title">🖱️ 手动微调技巧</div>
+                            <div className="section-content">
+                                如果系统切图不准也没关系！你可以在切图预览界面直接<b>点击缺失的贴纸</b>来手动添加红框。
                             </div>
                         </div>
 
