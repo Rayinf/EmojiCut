@@ -1,62 +1,29 @@
 import { GoogleGenAI, Type } from "@google/genai";
 
-const getAiClient = () => {
-  const apiKey = process.env.API_KEY;
+const getAiClient = (passedKey?: string) => {
+  const apiKey = passedKey || process.env.API_KEY || (typeof window !== 'undefined' ? localStorage.getItem('gemini_api_key') : null);
   if (!apiKey) {
-    console.warn("API_KEY is not set. Skipping AI features.");
     return null;
   }
   return new GoogleGenAI({ apiKey });
 };
 
-// ==================== Sticker Style Presets ====================
-
-export interface StickerStyle {
-  id: string;
-  name: string;        // 中文显示名
-  description: string; // 风格描述
-}
-
-export const STICKER_STYLES: StickerStyle[] = [
-  {
-    id: 'line_cute',
-    name: '可爱LINE贴纸',
-    description: '可爱的卡通二头身角色，适合日常聊天'
-  },
-  {
-    id: 'chibi_expressive',
-    name: 'Q版表情包',
-    description: '夸张表情的Q版角色，情绪丰富'
-  },
-  {
-    id: 'kawaii_pastel',
-    name: '粉彩少女风',
-    description: '柔和粉彩配色，梦幻少女感'
-  },
-  {
-    id: 'dynamic_action',
-    name: '动感活力风',
-    description: '活泼动作姿势，充满活力'
-  }
-];
+// ==================== AI Logic ====================
 
 /**
  * Build the generation prompt with base template + user-defined style
  * If user provides a custom style, it takes priority over the preset style
  */
-const buildStickerPrompt = (style: StickerStyle, customStyle?: string): string => {
+const buildStickerPrompt = (manualStyle?: string): string => {
   const basePrompt = `为图中角色设计一个可爱的卡通角色，生成 16种 LINE 贴纸。姿势和文字排版要富有创意，变化丰富，设计独特。对话应为简体中文，可以是角色在不同场景，不同情绪的，角色比例二头身。
 
 重要要求：背景必须是纯白色(#FFFFFF)，不要有任何其他颜色或图案。每个贴纸之间要有足够间距。`;
 
-  // 如果用户提供了自定义风格，优先使用用户的风格描述
-  const styleDescription = customStyle && customStyle.trim()
-    ? customStyle.trim()
-    : style.description;
+  const styleDescription = manualStyle && manualStyle.trim()
+    ? manualStyle.trim()
+    : "可爱的卡通二头身角色，适合日常聊天";
 
-  const styleHint = `画面风格：${styleDescription}`;
-
-  return `${basePrompt}\n${styleHint}`;
+  return `${basePrompt}\n画面风格：${styleDescription}`;
 };
 
 /**
@@ -64,10 +31,10 @@ const buildStickerPrompt = (style: StickerStyle, customStyle?: string): string =
  */
 export const generateStickerSheet = async (
   referenceImage: string,
-  style: StickerStyle,
-  customStyle?: string
+  manualStyle?: string,
+  userApiKey?: string
 ): Promise<string> => {
-  const ai = getAiClient();
+  const ai = getAiClient(userApiKey);
   if (!ai) throw new Error("API_KEY is not set");
 
   try {
@@ -76,7 +43,7 @@ export const generateStickerSheet = async (
       ? referenceImage.split(',')[1]
       : referenceImage;
 
-    const prompt = buildStickerPrompt(style, customStyle);
+    const prompt = buildStickerPrompt(manualStyle);
 
     const response = await ai.models.generateContent({
       model: 'gemini-3-pro-image-preview',
@@ -115,8 +82,8 @@ export const generateStickerSheet = async (
 
 // ==================== Sticker Naming ====================
 
-export const generateStickerName = async (base64Image: string): Promise<string> => {
-  const ai = getAiClient();
+export const generateStickerName = async (base64Image: string, userApiKey?: string): Promise<string> => {
+  const ai = getAiClient(userApiKey);
   if (!ai) return "sticker";
 
   try {

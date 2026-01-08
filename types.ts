@@ -16,7 +16,7 @@ export interface ProcessingStatus {
 }
 
 // App mode: generate stickers first, then cut
-export type AppMode = 'generate' | 'cut';
+export type AppMode = 'landing' | 'generate' | 'cut';
 
 export interface GenerationState {
   referenceImage: string | null;

@@ -42,18 +42,18 @@ const mergeRects = (rects: Rect[], distanceThreshold: number): Rect[] => {
 
     for (let i = 0; i < merged.length; i++) {
       if (visited.has(i)) continue;
-      
+
       let current = { ...merged[i] };
       visited.add(i);
 
       for (let j = i + 1; j < merged.length; j++) {
         if (visited.has(j)) continue;
-        
+
         const other = merged[j];
-        
+
         const xDist = Math.max(0, current.minX - other.maxX, other.minX - current.maxX);
         const yDist = Math.max(0, current.minY - other.maxY, other.minY - current.maxY);
-        
+
         if (xDist < distanceThreshold && yDist < distanceThreshold) {
           current.minX = Math.min(current.minX, other.minX);
           current.minY = Math.min(current.minY, other.minY);
@@ -78,92 +78,130 @@ export const extractStickerFromRect = (
   rect: Rect,
   defaultName: string = 'sticker'
 ): StickerSegment | null => {
-    const padding = 2;
-    const strokeWidth = 6; // Width of the white border
+  const padding = 2;
+  const strokeWidth = 6; // Width of the white border
 
-    const width = source.width;
-    const height = source.height;
+  const width = source.width;
+  const height = source.height;
 
-    // 1. Calculate dimensions for the raw cutout
-    const finalX = Math.max(0, rect.minX - padding);
-    const finalY = Math.max(0, rect.minY - padding);
-    const finalW = Math.min(width - finalX, (rect.maxX - rect.minX) + padding * 2);
-    const finalH = Math.min(height - finalY, (rect.maxY - rect.minY) + padding * 2);
+  // 1. Calculate dimensions for the raw cutout
+  const finalX = Math.max(0, rect.minX - padding);
+  const finalY = Math.max(0, rect.minY - padding);
+  const finalW = Math.min(width - finalX, (rect.maxX - rect.minX) + padding * 2);
+  const finalH = Math.min(height - finalY, (rect.maxY - rect.minY) + padding * 2);
 
-    if (finalW <= 0 || finalH <= 0) return null;
+  if (finalW <= 0 || finalH <= 0) return null;
 
-    // 2. Create the raw cutout with background removed
-    const segCanvas = document.createElement('canvas');
-    segCanvas.width = finalW;
-    segCanvas.height = finalH;
-    const segCtx = segCanvas.getContext('2d');
-    if (!segCtx) return null;
+  // 2. Create the raw cutout with background removed
+  const segCanvas = document.createElement('canvas');
+  segCanvas.width = finalW;
+  segCanvas.height = finalH;
+  const segCtx = segCanvas.getContext('2d');
+  if (!segCtx) return null;
 
-    segCtx.drawImage(
-      source,
-      finalX, finalY, finalW, finalH,
-      0, 0, finalW, finalH
-    );
+  segCtx.drawImage(
+    source,
+    finalX, finalY, finalW, finalH,
+    0, 0, finalW, finalH
+  );
 
-    const segImageData = segCtx.getImageData(0, 0, finalW, finalH);
-    const segPixels = segImageData.data;
-    for (let i = 0; i < segPixels.length; i += 4) {
-      if (isBackground(segPixels[i], segPixels[i+1], segPixels[i+2], segPixels[i+3])) {
-        segPixels[i+3] = 0; // Make transparent
-      }
+  const segImageData = segCtx.getImageData(0, 0, finalW, finalH);
+  const segPixels = segImageData.data;
+
+  // Use flood-fill to find ONLY exterior background
+  const isExterior = new Uint8Array(finalW * finalH);
+  const stack: [number, number][] = [];
+
+  // Push all edge pixels into the stack if they are background
+  for (let x = 0; x < finalW; x++) {
+    stack.push([x, 0], [x, finalH - 1]);
+  }
+  for (let y = 1; y < finalH - 1; y++) {
+    stack.push([0, y], [finalW - 1, y]);
+  }
+
+  while (stack.length > 0) {
+    const [cx, cy] = stack.pop()!;
+    const idx = (cy * finalW + cx) * 4;
+    const visitIdx = cy * finalW + cx;
+
+    if (!isExterior[visitIdx] && isBackground(segPixels[idx], segPixels[idx + 1], segPixels[idx + 2], segPixels[idx + 3])) {
+      isExterior[visitIdx] = 1;
+
+      // Check 4-neighbors
+      if (cx > 0) stack.push([cx - 1, cy]);
+      if (cx < finalW - 1) stack.push([cx + 1, cy]);
+      if (cy > 0) stack.push([cx, cy - 1]);
+      if (cy < finalH - 1) stack.push([cx, cy + 1]);
     }
-    segCtx.putImageData(segImageData, 0, 0);
+  }
 
-    // 3. Create a silhouette for the stroke
-    const silhouetteCanvas = document.createElement('canvas');
-    silhouetteCanvas.width = finalW;
-    silhouetteCanvas.height = finalH;
-    const sCtx = silhouetteCanvas.getContext('2d');
-    if (!sCtx) return null;
-
-    sCtx.drawImage(segCanvas, 0, 0);
-    sCtx.globalCompositeOperation = 'source-in';
-    sCtx.fillStyle = '#FFFFFF';
-    sCtx.fillRect(0, 0, finalW, finalH);
-
-    // 4. Create Final Canvas with extra space for the stroke
-    const finalCanvas = document.createElement('canvas');
-    finalCanvas.width = finalW + (strokeWidth * 2);
-    finalCanvas.height = finalH + (strokeWidth * 2);
-    const fCtx = finalCanvas.getContext('2d');
-    if (!fCtx) return null;
-
-    // Enable smoothing for better stroke edges
-    fCtx.imageSmoothingEnabled = true;
-    fCtx.imageSmoothingQuality = 'high';
-
-    // Draw the silhouette multiple times in a circle to create the stroke
-    const steps = 24; 
-    for (let i = 0; i < steps; i++) {
-        const angle = (i / steps) * 2 * Math.PI;
-        const ox = strokeWidth + Math.cos(angle) * strokeWidth;
-        const oy = strokeWidth + Math.sin(angle) * strokeWidth;
-        fCtx.drawImage(silhouetteCanvas, ox, oy);
+  // Now clear only pixels that are both exterior AND background
+  for (let i = 0; i < finalW * finalH; i++) {
+    if (isExterior[i]) {
+      segPixels[i * 4 + 3] = 0;
     }
-    
-    // Fill the center of the stroke to ensure no gaps between stroke and image
-    // (This also helps fill in small internal holes that were removed by background keying)
-    fCtx.drawImage(silhouetteCanvas, strokeWidth, strokeWidth);
+  }
+  segCtx.putImageData(segImageData, 0, 0);
 
-    // 5. Draw the original colored image on top
-    fCtx.globalCompositeOperation = 'source-over';
-    fCtx.drawImage(segCanvas, strokeWidth, strokeWidth);
+  // 3. Create a silhouette for the stroke
+  const silhouetteCanvas = document.createElement('canvas');
+  silhouetteCanvas.width = finalW;
+  silhouetteCanvas.height = finalH;
+  const sCtx = silhouetteCanvas.getContext('2d');
+  if (!sCtx) return null;
 
-    return {
-      id: crypto.randomUUID(),
-      dataUrl: finalCanvas.toDataURL('image/png'),
-      originalX: finalX,
-      originalY: finalY,
-      width: finalCanvas.width,
-      height: finalCanvas.height,
-      name: defaultName,
-      isNaming: false
-    };
+  sCtx.drawImage(segCanvas, 0, 0);
+  sCtx.globalCompositeOperation = 'source-in';
+  sCtx.fillStyle = '#FFFFFF';
+  sCtx.fillRect(0, 0, finalW, finalH);
+
+  // 4. Create Final Canvas with extra space for the stroke
+  const finalCanvas = document.createElement('canvas');
+  finalCanvas.width = finalW + (strokeWidth * 2);
+  finalCanvas.height = finalH + (strokeWidth * 2);
+  const fCtx = finalCanvas.getContext('2d');
+  if (!fCtx) return null;
+
+  // Enable smoothing for better stroke edges
+  fCtx.imageSmoothingEnabled = true;
+  fCtx.imageSmoothingQuality = 'high';
+
+  // Draw the silhouette multiple times in a circle to create the stroke
+  const steps = 24;
+  for (let i = 0; i < steps; i++) {
+    const angle = (i / steps) * 2 * Math.PI;
+    const ox = strokeWidth + Math.cos(angle) * strokeWidth;
+    const oy = strokeWidth + Math.sin(angle) * strokeWidth;
+    fCtx.drawImage(silhouetteCanvas, ox, oy);
+  }
+
+  // Fill the center of the stroke to ensure no gaps between stroke and image
+  // (This also helps fill in small internal holes that were removed by background keying)
+  fCtx.drawImage(silhouetteCanvas, strokeWidth, strokeWidth);
+
+  // 5. Draw the original colored image on top
+  fCtx.globalCompositeOperation = 'source-over';
+  fCtx.drawImage(segCanvas, strokeWidth, strokeWidth);
+
+  const generateId = () => {
+    try {
+      return crypto.randomUUID();
+    } catch (e) {
+      return Date.now().toString(36) + Math.random().toString(36).substring(2);
+    }
+  };
+
+  return {
+    id: generateId(),
+    dataUrl: finalCanvas.toDataURL('image/png'),
+    originalX: finalX,
+    originalY: finalY,
+    width: finalCanvas.width,
+    height: finalCanvas.height,
+    name: defaultName,
+    isNaming: false
+  };
 };
 
 /**
@@ -177,7 +215,7 @@ export const processStickerSheet = async (
   canvas.width = image.width;
   canvas.height = image.height;
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  
+
   if (!ctx) throw new Error("Could not get canvas context");
 
   ctx.drawImage(image, 0, 0);
@@ -190,7 +228,7 @@ export const processStickerSheet = async (
   const rawRects: Rect[] = [];
   const getIdx = (x: number, y: number) => (y * width + x) * 4;
 
-  for (let y = 0; y < height; y++) { 
+  for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const visitIdx = y * width + x;
 
@@ -200,7 +238,7 @@ export const processStickerSheet = async (
       if (!isBackground(data[idx], data[idx + 1], data[idx + 2], data[idx + 3])) {
         let minX = x, maxX = x, minY = y, maxY = y;
         let count = 0;
-        
+
         const stack = [[x, y]];
         visited[visitIdx] = 1;
 
@@ -245,12 +283,12 @@ export const processStickerSheet = async (
   onProgress(`Identified ${mergedRects.length} stickers. Extracting...`);
 
   const finalSegments: StickerSegment[] = [];
-  
+
   for (let i = 0; i < mergedRects.length; i++) {
     const rect = mergedRects[i];
     const segment = extractStickerFromRect(canvas, rect, `sticker_${i + 1}`);
     if (segment) {
-        finalSegments.push(segment);
+      finalSegments.push(segment);
     }
   }
 
