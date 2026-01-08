@@ -23,7 +23,7 @@ const CutePrinter2D: React.FC<CutePrinterProps> = ({ status, progress, message, 
     const [showInstructions, setShowInstructions] = useState(false);
     const [isDragging, setIsDragging] = useState(false);
     const [showKeySaved, setShowKeySaved] = useState(false);
-    const [activeMode, setActiveMode] = useState<'generate' | 'direct'>('generate');
+    const [activeMode, setActiveMode] = useState<'generate' | 'direct'>(apiKey ? 'generate' : 'direct');
     const [showKeyError, setShowKeyError] = useState(false);
 
     const copyToClipboard = (text: string) => {
@@ -363,7 +363,7 @@ const CutePrinter2D: React.FC<CutePrinterProps> = ({ status, progress, message, 
                         <div className="instruction-section">
                             <div className="section-title">🖱️ 手动微调技巧</div>
                             <div className="section-content">
-                                如果系统切图不准也没关系！你可以在切图预览界面直接<b>点击缺失的贴纸</b>来手动添加红框。
+                                如果系统切图不准也没关系！你可以在切图预览界面直接<b>点击手动添加</b>来框选准确的单个贴纸。
                             </div>
                         </div>
 
