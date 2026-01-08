@@ -250,7 +250,7 @@ const CutePrinter2D: React.FC<CutePrinterProps> = ({ status, progress, message, 
             )}
 
             {/* Physical Controls */}
-            <div className="flex items-center justify-center gap-6 w-full px-4 mt-6 pb-4">
+            <div className="flex items-center justify-center gap-7 w-full px-2 mt-6 pb-4">
                 {/* Power / Status Indicator / AI Mode Toggle */}
                 <div
                     className="flex flex-col items-center gap-2 cursor-pointer group"

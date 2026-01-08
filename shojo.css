@@ -846,3 +846,10 @@ select {
 .machine-screen.mode-direct .screen-text {
     color: #4299e1;
 }
+
+/* Mode Label Wrapping Fix */
+.cute-machine .flex-col.items-center.gap-2 div[class*="text-[10px]"] {
+    white-space: nowrap;
+    text-align: center;
+    min-width: 60px;
+}
